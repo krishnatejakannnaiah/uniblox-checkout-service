@@ -1,0 +1,478 @@
+{
+  "info": {
+    "name": "Uniblox Checkout Service",
+    "description": "API collection for the Uniblox backend assignment. Covers health, products, cart management, checkout, idempotency, rewards, coupon redemption, and reporting.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "cartId",
+      "value": ""
+    },
+    {
+      "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "couponCode",
+      "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "firstOrderId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Health and Products",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Health check returns 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Service status is ok', function () { pm.expect(pm.response.json().status).to.eql('ok'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List products",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/products"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Products endpoint returns 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('At least five products are listed', function () { pm.expect(pm.response.json().products.length).to.be.at.least(5); });",
+                  "pm.test('Wireless Mouse exists', function () { pm.expect(pm.response.json().products.some(function (p) { return p.id === 'p-100'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Cart Operations",
+      "item": [
+        {
+          "name": "Create cart",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/carts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cart created', function () { pm.response.to.have.status(201); });",
+                  "var body = pm.response.json();",
+                  "pm.collectionVariables.set('cartId', body.cart.id);",
+                  "pm.test('Cart ID was returned', function () { pm.expect(body.cart.id).to.be.a('string').and.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add one Wireless Mouse",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"p-100\",\n  \"quantity\": 1\n}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/items"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Item added', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cart contains Wireless Mouse', function () { pm.expect(pm.response.json().cart.items.some(function (i) { return i.productId === 'p-100'; })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get cart",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/carts/{{cartId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cart retrieved', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cart has one item', function () { pm.expect(pm.response.json().cart.items.length).to.eql(1); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update item quantity to two",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 2\n}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/p-100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Quantity updated', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Quantity is two', function () { pm.expect(pm.response.json().cart.items[0].quantity).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove item",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/carts/{{cartId}}/items/p-100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Item removed', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Cart is empty', function () { pm.expect(pm.response.json().cart.items.length).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Checkout and Idempotency",
+      "item": [
+        {
+          "name": "Create a fresh cart for checkout",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/carts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cart created', function () { pm.response.to.have.status(201); });",
+                  "pm.collectionVariables.set('cartId', pm.response.json().cart.id);",
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add item for checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"p-100\",\n  \"quantity\": 1\n}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/items"
+          }
+        },
+        {
+          "name": "Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/checkout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Checkout succeeds', function () { pm.response.to.have.status(201); });",
+                  "var body = pm.response.json();",
+                  "pm.collectionVariables.set('orderId', body.order.id);",
+                  "pm.test('Order has a valid total', function () { pm.expect(body.order.totalPaise).to.be.a('number'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retry the same checkout request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/checkout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Retry returns the original successful order', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Retry returns the same order ID', function () { pm.expect(pm.response.json().order.id).to.eql(pm.collectionVariables.get('orderId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get order by ID",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/orders/{{orderId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Order retrieved', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Order ID matches checkout', function () { pm.expect(pm.response.json().order.id).to.eql(pm.collectionVariables.get('orderId')); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Rewards and Coupons",
+      "item": [
+        {
+          "name": "Reward flow instructions",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health",
+            "description": "Run this folder after at least three successful orders exist. The API issues a reward for each third-order milestone that has not already had a coupon generated. Generate the coupon, then copy its code into the couponCode collection variable before redeeming it."
+          }
+        },
+        {
+          "name": "Generate reward coupon",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/admin/coupons/generate"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Reward coupon generated', function () { pm.response.to.have.status(201); });",
+                  "var body = pm.response.json();",
+                  "pm.collectionVariables.set('couponCode', body.coupon.code);",
+                  "pm.test('Coupon is available', function () { pm.expect(body.coupon.status).to.eql('available'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List coupons",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/coupons"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Coupons listed', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Generated coupon is listed', function () { pm.expect(pm.response.json().coupons.some(function (c) { return c.code === pm.collectionVariables.get('couponCode'); })).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a cart for coupon redemption",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/carts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cart created', function () { pm.response.to.have.status(201); });",
+                  "pm.collectionVariables.set('cartId', pm.response.json().cart.id);",
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add item for coupon redemption",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"p-100\",\n  \"quantity\": 1\n}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/items"
+          }
+        },
+        {
+          "name": "Redeem coupon at checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"couponCode\": \"{{couponCode}}\"\n}"
+            },
+            "url": "{{baseUrl}}/carts/{{cartId}}/checkout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Coupon checkout succeeds', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Coupon is applied', function () { pm.expect(pm.response.json().order.couponCode).to.eql(pm.collectionVariables.get('couponCode')); });",
+                  "pm.test('Discount is greater than zero', function () { pm.expect(pm.response.json().order.discountPaise).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Admin Report",
+      "item": [
+        {
+          "name": "Get admin sales report",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/admin/report"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Admin report returns 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Report payload exists', function () { pm.expect(pm.response.json().report).to.be.an('object'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
